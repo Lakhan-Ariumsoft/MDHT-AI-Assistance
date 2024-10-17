@@ -1,0 +1,307 @@
+<!-- <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Upload and Chat</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            margin: 0;
+            height: 100vh;
+        }
+        .chat-container {
+            flex: 1;
+            padding: 20px;
+            border-right: 2px solid #ccc;
+            overflow-y: auto;
+            background-color: #f4f4f4;
+        }
+        .upload-container {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background-color: #ffffff;
+        }
+        h1 {
+            font-size: 24px;
+        }
+        .chat-box {
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 10px;
+            height: 400px;
+            overflow-y: auto;
+            margin-bottom: 10px;
+            background-color: #fff;
+        }
+        .chat-message {
+            margin: 10px 0;
+            padding: 8px;
+            border-radius: 5px;
+        }
+        .chat-message.user {
+            background-color: #d1e7dd;
+            text-align: right;
+        }
+        .chat-message.bot {
+            background-color: #f8d7da;
+            text-align: left;
+        }
+        .chat-input {
+            display: flex;
+            justify-content: space-between;
+        }
+        textarea {
+            width: 80%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            resize: none;
+        }
+        input[type="submit"] {
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        input[type="submit"]:hover {
+            background-color: #0056b3;
+        }
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px;
+            border: 1px solid #ddd;
+            margin-bottom: 5px;
+            border-radius: 4px;
+        }
+        .delete-btn {
+            background-color: transparent;
+            border: none;
+            cursor: pointer;
+        }
+        .delete-btn:hover {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="chat-container">
+        <h1>Chat with OpenAI</h1>
+        <div id="chat-box" class="chat-box"></div>
+        <div class="chat-input">
+            <textarea id="message" rows="3" placeholder="Type your message here" required></textarea>
+            <input type="submit" value="Send" onclick="sendMessage()">
+        </div>
+    </div>
+
+    <div class="upload-container">
+        <h1>Upload Files</h1>
+        <form id="upload-form" enctype="multipart/form-data">
+            <input type="file" name="files" multiple required>
+            <input type="submit" value="Upload">
+        </form>
+
+        <h1>Uploaded Files</h1>
+        <div id="file-list"></div>
+    </div>
+
+    <script>
+        document.getElementById('upload-form').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const formData = new FormData(event.target);
+            const response = await fetch('/uploadfiles/', {
+                method: 'POST',
+                body: formData,
+            });
+            const result = await response.json();
+            // alert(result.info); // Show upload message
+            await updateFileList(); // Refresh the file list
+        });
+
+        async function deleteFile(filename) {
+            const response = await fetch(`/deletefiles/${filename}`, {
+                method: 'DELETE',
+            });
+
+            if (response.ok) {
+                // alert(`File '${filename}' deleted successfully!`);
+                await updateFileList(); // Refresh the file list
+            } //else {
+            //     // alert(`Error: ${await response.text()}`);
+            // }
+        }
+
+        async function updateFileList() {
+            const response = await fetch('/uploadedfiles/');
+            const files = await response.json();
+
+            const fileListDiv = document.getElementById('file-list');
+            fileListDiv.innerHTML = ''; // Clear previous list
+
+            files.forEach(file => {
+                const fileItem = document.createElement('div');
+                fileItem.classList.add('file-item');
+                fileItem.innerHTML = `${file} <button class="delete-btn" onclick="deleteFile('${file}')"><i class="fas fa-trash-alt"></i></button>`;
+                fileListDiv.appendChild(fileItem);
+            });
+        }
+
+        async function sendMessage() {
+            const message = document.getElementById('message').value;
+            const response = await fetch('/chat/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({ message }),
+            });
+
+            const result = await response.json();
+            updateChat(result.response);
+            document.getElementById('message').value = ''; // Clear the message input
+        }
+
+        function updateChat(response) {
+            const chatBox = document.getElementById('chat-box');
+            const userMessage = document.createElement('div');
+            userMessage.classList.add('chat-message', 'user');
+            userMessage.textContent = document.getElementById('message').value;
+
+            const botMessage = document.createElement('div');
+            botMessage.classList.add('chat-message', 'bot');
+            botMessage.textContent = response;
+
+            chatBox.appendChild(userMessage);
+            chatBox.appendChild(botMessage);
+            chatBox.scrollTop = chatBox.scrollHeight; // Scroll to the bottom
+        }
+
+        // Initialize file list on page load
+        window.onload = updateFileList;
+    </script>
+</body>
+</html> -->
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- 
+
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File Upload and Chat</title>
+</head>
+<body>
+    <h1>Upload Files</h1>
+    <form id="upload-form" enctype="multipart/form-data">
+        <input type="file" name="files" multiple required>
+        <input type="submit" value="Upload">
+    </form>
+
+    <h1>Delete File</h1>
+    <form id="delete-form" onsubmit="event.preventDefault(); deleteFile();">
+        <input type="text" id="filename" placeholder="Enter filename to delete" required>
+        <input type="submit" value="Delete">
+    </form>
+
+    <h1>Chat with OpenAI</h1>
+    <form id="chat-form" onsubmit="event.preventDefault(); sendMessage();">
+        <textarea id="message" rows="4" cols="50" placeholder="Type your message here" required></textarea>
+        <input type="submit" value="Send">
+    </form>
+
+    <h2>Chat History</h2>
+    <div id="chat-history"></div>
+
+    <script>
+        document.getElementById('upload-form').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const formData = new FormData(event.target);
+            const response = await fetch('/uploadfiles/', {
+                method: 'POST',
+                body: formData,
+            });
+            const result = await response.json();
+            alert(result.info); // Show upload message
+        });
+
+        async function deleteFile() {
+            const filename = document.getElementById('filename').value;
+            const response = await fetch(`/deletefiles/${filename}`, {
+                method: 'DELETE',
+            });
+
+            if (response.ok) {
+                alert(`File '${filename}' deleted successfully!`);
+            } else {
+                alert(`Error: ${await response.text()}`);
+            }
+        }
+
+        async function sendMessage() {
+            const message = document.getElementById('message').value;
+            const response = await fetch('/chat/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({ message }),
+            });
+
+            const result = await response.json();
+            updateChatHistory(result.chat_history);
+            document.getElementById('message').value = ''; // Clear the message input
+        }
+
+        function updateChatHistory(chatHistory) {
+            const chatHistoryDiv = document.getElementById('chat-history');
+            chatHistoryDiv.innerHTML = ''; // Clear previous history
+
+            chatHistory.forEach(entry => {
+                const userMessage = document.createElement('div');
+                userMessage.textContent = `User: ${entry.user}`;
+                const botMessage = document.createElement('div');
+                botMessage.textContent = `Bot: ${entry.bot}`;
+                chatHistoryDiv.appendChild(userMessage);
+                chatHistoryDiv.appendChild(botMessage);
+            });
+        }
+    </script>
+</body>
+</html>  -->
