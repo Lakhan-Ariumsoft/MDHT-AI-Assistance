@@ -1,6 +1,5 @@
-# OpenAI API Quickstart with FastAPI
+# MDHT OpenAI API with FastAPI
 
-This is an example pet name generator app used in the OpenAI API [quickstart tutorial](https://beta.openai.com/docs/quickstart). It uses the [FastAPI](https://fastapi.tiangolo.com/) web framework. Check out the tutorial or follow the instructions below to get set up.
 
 ## Setup
 
@@ -52,15 +51,8 @@ This is an example pet name generator app used in the OpenAI API [quickstart tut
 
    ```bash
    $ python app.py
+   or
+   $ python main:app --reload
    ```
 You should now be able to access the app at [http://localhost:5001](http://localhost:5001)! 
-
-   ![demo](https://user-images.githubusercontent.com/59533593/173504130-6b36bad6-267a-45b2-96b9-14abe9493ad1.gif)
-   
-This repogitory is based on the Flask code at [openai-quickstart-python](https://github.com/openai/openai-quickstart-python). For the full context behind OpenAI API Quickstart(Flask), check out the [tutorial](https://beta.openai.com/docs/quickstart).
-
-## Reference
-
-- [openai/openai-quickstart-python](https://github.com/openai/openai-quickstart-python)
-
 
