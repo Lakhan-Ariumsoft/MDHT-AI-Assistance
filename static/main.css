@@ -73,12 +73,12 @@ h3 {
 
 .user-message {
   align-self: flex-end !important;
-  background-color: #f7f7f8;
+  background-color: #ceb6f4;
 }
 
 .assistant-message {
   align-self: flex-start !important;
-  background-color: #ebfaeb;
+  background-color: #a7cdeb;
 }
 
 .message-input-container {
@@ -126,7 +126,7 @@ input[type="submit"],
 input[type="button"] {
   padding: 12px 16px;
   color: #fff;
-  background-color: #10a37f;
+  background-color: #1258a2;
   border: none;
   border-radius: 4px;
   text-align: center;
@@ -146,7 +146,7 @@ input[type="button"] {
 
 input[type="text"] {
   padding: 12px 16px;
-  border: 1px solid #10a37f;
+  border: 1px solid #1258a2;
   border-radius: 4px;
   margin-bottom: 24px;
 }
@@ -203,8 +203,8 @@ input[type="text"] {
   display: none;
   position: fixed;
   top: 0;
-  width: 100%;
-  background-color: #10a37f;
+  width: 20%;
+  background-color: #58c04c;
   color: white;
   text-align: center;
   padding: 10px;
@@ -264,12 +264,12 @@ input[type="text"] {
 }
 
 .header {
-  background-color: white;
+  background-color:#cfccea;;
   width: 100%;
   padding: 10px 0;
   display: flex; /* Add this line */
   align-items: center; /* Center items vertically */
-  justify-content: start;
+  justify-content: center;
 }
 
 .header img {
@@ -294,11 +294,11 @@ input[type="text"] {
 }
 
 #send-btn {
-  width: 42px;
+  width: 62px;
   height: 32px;
   border-radius: 4px;
-  border: 1px solid #c5c5d2;
-  background-color: #10a37f;
+  border: 2px solid #c5c5d2;
+  background-color: #1258a2;
   color: #fff;
   cursor: pointer;
   display: flex;
@@ -313,7 +313,9 @@ input[type="text"] {
   align-items: center; /* Center content horizontally */
   padding: 20px;
   box-sizing: border-box;
-  border-right: 1px solid #c5c5d2; /* Optional: border to separate from the chat section */
+  border-right: 3px solid #0c0b0f;
+  background-color: #e4ebe4;
+
 }
 .centered-text {
   margin-top: 85%;
@@ -330,7 +332,7 @@ input[type="text"] {
   ); /* Adjust width to ensure it fits within the parent's padding */
   padding: 4px 8px;
   cursor: pointer;
-  background-color: #10a37f;
+  background-color: #1258a2;
   color: white;
   border: none;
   max-height: 32px;
