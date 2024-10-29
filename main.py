@@ -107,6 +107,9 @@ class RequestPayload(BaseModel):
     vectorStoreID: list[str]
     AssistantID: str
 
+@app.get("/")
+async def health_check():
+    return {"server":"running"}
 
 @app.post("/aiResponse/")
 async def fetch_and_respond(payload: RequestPayload):
