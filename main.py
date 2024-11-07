@@ -6,6 +6,9 @@ import time
 from openai import OpenAI
 import requests
 from dotenv import load_dotenv
+import json
+import re
+
 load_dotenv()
 client = OpenAI()
 app = FastAPI()
@@ -38,23 +41,82 @@ def getLoginToken():
     
 
 def extractData(apiResponse):
-    # Access the data list
-    diseases_data = apiResponse.get("data", [])
-    # Dictionary to store the extracted data
-    extracted_data = {}
 
-    # Iterate over each disease in the data list
-    for disease in diseases_data:
-        # Get the ds_name for the current disease
-        ds_name = disease.get("ds_name")
-        # Get the list of titles from baseline_data's symptoms
-        titles = [symptom.get("title") for symptom in disease.get("baseline_data", {}).get("symptoms", [])]
+        diseases_data = apiResponse.get("data", [])
+        extracted_data = {}
 
-        # Add the titles to the extracted_data dictionary under the ds_name key
-        if ds_name:
-            extracted_data[ds_name] = titles
-    print(extracted_data)
-    return extracted_data
+        # Iterate over each disease in the data list
+        for disease in diseases_data:
+      
+
+            ds_name = disease.get("ds_name")
+            titles = [f"{symptom.get('title')} score {symptom.get('value')}" for symptom in disease.get("baseline_data", {}).get("symptoms", [])]
+          
+            if ds_name:
+                extracted_data[ds_name] = titles
+        print(extracted_data)
+        return extracted_data
+
+# Function to interact with assistant and get a response for each prompt
+def getAssistantResponse(prompt, assistant_id, vector_store_id, max_retries=10, retry_delay=2):
+    # responses = []
+    print("inside getAssistant")
+    # Iterate through each prompt and get a response
+    thread_id = thread_cache.get(assistant_id)
+    
+    # Check if thread exists; if completed, reset it
+    if thread_id:
+        try:
+            run_response = client.beta.threads.get(thread_id=thread_id)
+            if run_response["status"] == "completed":
+                thread_cache.pop(assistant_id, None)
+                thread_id = None
+        except Exception:
+            thread_cache.pop(assistant_id, None)
+            thread_id = None
+    
+    # Create a new thread if no valid one exists
+    if not thread_id:
+        response = client.beta.threads.create_and_run(
+            instructions="Strictly Give me a response in the following JSON format:"
+                        "- Summary: summary of my health condition in 30 words."
+                        "- Suggested medications: (top 3)."
+                        "- Risk Profile: High Risk, Medium Risk, or Low Risk."
+                        "- Immediate consultation needed: Yes or No.",
+            assistant_id=assistant_id,
+            thread={
+                "messages": [{"role": "user", "content": prompt}],
+                "tool_resources": {"file_search": {"vector_store_ids": vector_store_id}},
+            },
+            extra_headers={"OpenAI-Beta": "assistants=v2"} 
+        )
+        thread_id = response.thread_id
+        thread_cache[assistant_id] = thread_id
+        run_id = response.id
+    else:
+        # Use the existing thread
+        run_response = client.beta.threads.runs.create(
+            thread_id=thread_id, messages=[{"role": "user", "content": prompt}]
+        )
+        run_id = run_response.id
+
+    # Retry loop to check for completion
+    retries = 0
+    while retries < max_retries:
+        run_status = client.beta.threads.runs.retrieve(thread_id=thread_id, run_id=run_id)
+        if run_status.status == "completed":
+            # Retrieve the last message in the thread
+            thread_messages = client.beta.threads.messages.list(thread_id=thread_id, limit=5, order="desc")
+            responses  = thread_messages.data[0].content[0].text.value
+            # responses.append(response_content)
+            break  # Exit retry loop on success
+        time.sleep(retry_delay)
+        retries += 1
+    else:
+        responses = ("The assistant did not respond in time for this prompt. Please try again.")
+    
+    return responses
+
 
 # Function to generate prompts for each disease
 def generatePrompts(extracted_data):
@@ -75,7 +137,7 @@ def generatePrompts(extracted_data):
     return prompts
 
 # Function to retrieve data and format as a prompt
-def get_data_and_convert_to_prompt(token , apiUrl):
+def getDataToPrompt(token , apiUrl):
     headers = {
         'token': token,
         'Content-Type': 'application/json'
@@ -92,106 +154,116 @@ def get_data_and_convert_to_prompt(token , apiUrl):
         raise HTTPException(status_code=500, detail="Failed to retrieve data")
 
 
-# Function to interact with assistant and get a response for each prompt
-def get_assistant_response(prompts, assistant_id, vector_store_id, max_retries=10, retry_delay=2):
-    responses = []
-    
-    # Iterate through each prompt and get a response
-    for prompt in prompts:
-        thread_id = thread_cache.get(assistant_id)
-        
-        # Check if thread exists; if completed, reset it
-        if thread_id:
-            try:
-                run_response = client.beta.threads.get(thread_id=thread_id)
-                if run_response["status"] == "completed":
-                    thread_cache.pop(assistant_id, None)
-                    thread_id = None
-            except Exception:
-                thread_cache.pop(assistant_id, None)
-                thread_id = None
-        
-        # Create a new thread if no valid one exists
-        if not thread_id:
-            response = client.beta.threads.create_and_run(
-                instructions="Give me a response in the following format:\n"
-                            "- Summary of my health condition in 30 words.\n"
-                            "- Suggested medications (top 3).\n"
-                            "- Risk assessment: High Risk, Medium Risk, or Low Risk.\n"
-                            "- Immediate consultation needed: Yes or No.",
-                assistant_id=assistant_id,
-                thread={
-                    "messages": [{"role": "user", "content": prompt}],
-                    "tool_resources": {"file_search": {"vector_store_ids": vector_store_id}},
-                },
-                extra_headers={"OpenAI-Beta": "assistants=v2"} 
-            )
-            thread_id = response.thread_id
-            thread_cache[assistant_id] = thread_id
-            run_id = response.id
-        else:
-            # Use the existing thread
-            run_response = client.beta.threads.runs.create(
-                thread_id=thread_id, messages=[{"role": "user", "content": prompt}]
-            )
-            run_id = run_response.id
-
-        # Retry loop to check for completion
-        retries = 0
-        while retries < max_retries:
-            run_status = client.beta.threads.runs.retrieve(thread_id=thread_id, run_id=run_id)
-            if run_status.status == "completed":
-                # Retrieve the last message in the thread
-                thread_messages = client.beta.threads.messages.list(thread_id=thread_id, limit=5, order="desc")
-                response_content = thread_messages.data[0].content[0].text.value
-                responses.append(response_content)
-                break  # Exit retry loop on success
-            time.sleep(retry_delay)
-            retries += 1
-        else:
-            responses.append("The assistant did not respond in time for this prompt. Please try again.")
-    
-    return responses
-
-
 class RequestPayload(BaseModel):
     patientID: str
     token: str
-    # mdhtApiUrl: str
     loginID: str
+
+class AIPayload(BaseModel):
+    prompt: str
     vectorStoreID: list[str]
     AssistantID: str
 
+class ConvertJson(BaseModel):
+    AIinsights : str
 
-@app.post("/aiResponse/")
-async def fetch_and_respond(payload: RequestPayload):
+
+@app.post("/getAIinsights/")
+async def fetch_and_respond(payload: AIPayload):
     try:
-        # Access data from the payload
-        token = payload.token
-        login_id = payload.loginID
-        patientID = payload.patientID
-        # mdhtApiUrl = payload.mdhtApiUrl
+        prompt = payload.prompt
         vectorStoreID = payload.vectorStoreID
         AssistantID = payload.AssistantID
 
+        print(prompt ,vectorStoreID ,AssistantID )
+
+        AI_insights = getAssistantResponse(prompt ,AssistantID ,  vectorStoreID)
+        
+        print("Assistant:", AI_insights)
+
+        return  {"AI Insights":AI_insights}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@app.post("/convertToJson/")
+async def convert_to_json(payload :ConvertJson):
+    # Check if the response is empty
+    assistant_response = payload.AIinsights
+
+    if not assistant_response.strip():
+        print("Error: assistant_response is empty.")
+        return {"error": "Empty response"}
+
+    # Initialize an empty dictionary to hold the parsed data
+    response_json = {
+        "summary": None,
+        "medications": [],
+        "risk profile": None,
+        "consultation_needed": None
+    }
+
+    # Define regex patterns to match each part of the response
+    summary_pattern = r"(?i)summary[:\-\s\*]*(.*?)(?=\n|$)"
+    medications_pattern = r"(?i)suggested\s+medications[:\-\s\*]*(.*?)(?=risk|immediate|$)"
+    # risk_pattern = r"(?i)risk\s+profile[:\-\s\*]*(.*?)(?=\n|$)
+    risk_pattern = r"(?i)(risk\s+profile|risk)[:\-\s\*]*(.*?)(?=\n|$)"
+    consultation_pattern = r"(?i)immediate\s+consultation\s+needed[:\-\s\*]*(.*?)(?=\n|$)"
+
+    # Extract summary
+    summary_match = re.search(summary_pattern, assistant_response, re.DOTALL)
+    if summary_match:
+        response_json["summary"] = summary_match.group(1).strip()
+
+    # Extract medications as list items, handling bullet points
+    medications_match = re.search(medications_pattern, assistant_response, re.DOTALL)
+    if medications_match:
+        medications_text = medications_match.group(1).strip()
+        # Split medications by line breaks or numbers if they are listed as bullet points or numbered
+        medications = re.split(r'\n|\d+\.', medications_text)
+        response_json["medications"] = [med.strip() for med in medications if med.strip()]
+
+    # Extract risk
+    risk_match = re.search(risk_pattern, assistant_response, re.DOTALL)
+    if risk_match:
+        response_json["risk profile"] = risk_match.group(1).strip()
+
+    # Extract consultation needed
+    consultation_match = re.search(consultation_pattern, assistant_response, re.DOTALL)
+    if consultation_match:
+        response_json["consultation_needed"] = consultation_match.group(1).strip()
+
+    return response_json 
+
+
+@app.post("/getPrompts/")
+async def getPromptsdata(payload: RequestPayload):
+    try:
+        # Access data from the payload
+        token = payload.token
+        loginID = payload.loginID
+        patientID = payload.patientID
+        # mdhtApiUrl = payload.mdhtApiUrl
+        
         apiUrl = f"https://www.mdhealthtrak.com/api/v2/get-patient-ds?patientId={patientID}&recordType=0"
 
+        # apiUrl = f"https://www.mdhealthtrak.com/api/getResidentDiseasesAndSymptomForAI?resident_id={patientID}"
+
         # Step 2: Fetch data and convert it to a prompt
-        prompt = get_data_and_convert_to_prompt(token, apiUrl)
-
-        assistant_response = get_assistant_response(prompt ,AssistantID ,  vectorStoreID)
-        print("Assistant:", assistant_response)
-
-        
-        return {"assistant_response": assistant_response}
+        prompts = getDataToPrompt(token, apiUrl)
+        print("Prompt",prompts)
+        return {"Prompts": prompts}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/")
-async def health_check():
-    return {"server":"running"}
-
+async def healthCheck():
+    try:
+        return {"server":"running"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 
