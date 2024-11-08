@@ -8,6 +8,7 @@ import requests
 from dotenv import load_dotenv
 import json
 import re
+from typing import Dict, Any 
 
 load_dotenv()
 client = OpenAI()
@@ -18,49 +19,33 @@ thread_cache = {}
 client.api_key = os.getenv("OPENAI_API_KEY")
 
 
-# Login URL and external data URL
-login_url = 'https://www.mdhealthtrak.com/api/v2/userLogin'
-
-
-# Function to get login token and ID
-def getLoginToken():
-    payload = {
-        "user": "vishalphirkoj13@gmail.com",
-        "ccode": "+91_IN",
-        "logintype": "email",
-        "password": "123456789@V"
-    }
-    response = requests.post(login_url, json=payload)
-    if response.status_code == 200:
-        response_json = response.json()
-        token = response_json['data']['token']
-        login_id = response_json['data']['login_id']
-        return token, login_id
-    else:
-        raise HTTPException(status_code=500, detail="Failed to log in")
-    
-
 def extractData(apiResponse):
 
-        diseases_data = apiResponse.get("data", [])
+        diseases_data = apiResponse.get("diseases", [])
         extracted_data = {}
 
-        # Iterate over each disease in the data list
+        # Iterate over each disease in the diseases list
         for disease in diseases_data:
-      
-
             ds_name = disease.get("ds_name")
-            titles = [f"{symptom.get('title')} score {symptom.get('value')}" for symptom in disease.get("baseline_data", {}).get("symptoms", [])]
-          
+            symptoms_list = disease.get("symptoms", [])
+            
+            # Extract symptoms if present
+            symptoms = [
+                f"{symptom.get('title')} score {symptom.get('value')}"
+                for symptom in symptoms_list
+                if 'title' in symptom and 'value' in symptom
+            ]
+            
+            # Add disease and symptoms to extracted data if disease name exists
             if ds_name:
-                extracted_data[ds_name] = titles
-        print(extracted_data)
+                extracted_data[ds_name] = symptoms
+
+        print("Extracted Data" ,extracted_data)
         return extracted_data
 
 # Function to interact with assistant and get a response for each prompt
 def getAssistantResponse(prompt, assistant_id, vector_store_id, max_retries=10, retry_delay=2):
     # responses = []
-    print("inside getAssistant")
     # Iterate through each prompt and get a response
     thread_id = thread_cache.get(assistant_id)
     
@@ -122,7 +107,9 @@ def getAssistantResponse(prompt, assistant_id, vector_store_id, max_retries=10, 
 def generatePrompts(extracted_data):
     prompts = []
     for ds_name, symptoms in extracted_data.items():
-        # Join symptoms with commas, with the last one separated by 'and' for readability
+        if not ds_name or not symptoms:
+            continue
+
         symptoms_text = ', '.join(symptoms[:-1]) + f" and {symptoms[-1]}" if len(symptoms) > 1 else symptoms[0]
         
         # Generate the prompt
@@ -155,9 +142,8 @@ def getDataToPrompt(token , apiUrl):
 
 
 class RequestPayload(BaseModel):
-    patientID: str
-    token: str
-    loginID: str
+    jsonResponse: Dict[str, Any]
+
 
 class AIPayload(BaseModel):
     prompt: str
@@ -175,7 +161,6 @@ async def fetch_and_respond(payload: AIPayload):
         vectorStoreID = payload.vectorStoreID
         AssistantID = payload.AssistantID
 
-        print(prompt ,vectorStoreID ,AssistantID )
 
         AI_insights = getAssistantResponse(prompt ,AssistantID ,  vectorStoreID)
         
@@ -240,18 +225,15 @@ async def convert_to_json(payload :ConvertJson):
 @app.post("/getPrompts/")
 async def getPromptsdata(payload: RequestPayload):
     try:
-        # Access data from the payload
-        token = payload.token
-        loginID = payload.loginID
-        patientID = payload.patientID
-        # mdhtApiUrl = payload.mdhtApiUrl
-        
-        apiUrl = f"https://www.mdhealthtrak.com/api/v2/get-patient-ds?patientId={patientID}&recordType=0"
 
-        # apiUrl = f"https://www.mdhealthtrak.com/api/getResidentDiseasesAndSymptomForAI?resident_id={patientID}"
+        jsonResponse = payload.jsonResponse
+        data = extractData(jsonResponse)
 
-        # Step 2: Fetch data and convert it to a prompt
-        prompts = getDataToPrompt(token, apiUrl)
+        if not data:
+            return {"error": "No data extracted from jsonResponse"}
+
+        prompts = generatePrompts(data)
+
         print("Prompt",prompts)
         return {"Prompts": prompts}
     except Exception as e:
