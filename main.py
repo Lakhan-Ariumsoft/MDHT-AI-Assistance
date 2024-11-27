@@ -15,11 +15,8 @@ load_dotenv()
 client = OpenAI()
 app = FastAPI()
 
-
 thread_cache = {}
 client.api_key = os.getenv("OPENAI_API_KEY")
-
-
 
 def extractData(apiResponse):
     try:
@@ -28,67 +25,92 @@ def extractData(apiResponse):
         name = resident.get("name", "Unknown")
         age = resident.get("age", "Unknown")
         gender = resident.get("gender", "Unknown")
-        
+
         diseases_data = apiResponse.get("diseases", [])
         extracted_data = []
-        current_date = datetime.now(timezone.utc)  # Ensure UTC timezone
-        cutoff_date = current_date - timedelta(days=15)  # Past 15 days from now
+        common_symptoms = {}
+        current_date = datetime.now(timezone.utc)
+        cutoff_date = current_date - timedelta(days=15)  # Past 15 days
 
         # Iterate over each disease in the diseases list
         for disease in diseases_data:
             ds_name = disease.get("ds_name")
             records = disease.get("records", [])
-            
+
             disease_details = []
-            
+
             for record in records:
-                record_date_str = record.get("updatedAt")  # Correct key case
+                record_date_str = record.get("updatedAt")
                 if not record_date_str:
                     continue
-                
+
                 # Parse the ISO 8601 date format with UTC timezone
                 try:
                     record_date = datetime.fromisoformat(record_date_str.replace("Z", "+00:00"))
                 except ValueError:
-                    continue  # Skip invalid date formats
-                
+                    continue
+
                 # Compare against the cutoff date
                 if record_date >= cutoff_date:
                     symptoms_list = record.get("symptoms", [])
-                    symptoms = [
-                        f"{symptom.get('title')} at a scale of {round(symptom.get('value'), 2)} out of 10"
+                    log_time = record_date.strftime("%I:%M %p")
+                    log_date = record_date.strftime("%d %B %Y")
+
+                    symptoms = {
+                        symptom.get("title"): round(symptom.get("value"), 2)
                         for symptom in symptoms_list
                         if symptom.get('value', 0) > 0
-                    ]
-                    
+                    }
+
+                    # Store the detailed log for the disease
                     if symptoms:
-                        formatted_date = record_date.strftime("%dth of %B %Y")
-                        disease_details.append(f"on {formatted_date}, I have " + ", ".join(symptoms))
-            
-            # Add disease to extracted data only if there are recorded symptoms
+                        disease_details.append({
+                            "date": log_date,
+                            "time": log_time,
+                            "symptoms": symptoms
+                        })
+
+                        # Add to common symptoms
+                        for title, value in symptoms.items():
+                            if title not in common_symptoms:
+                                common_symptoms[title] = []
+                            common_symptoms[title].append((log_date, log_time, value))
+
             if disease_details:
                 extracted_data.append((ds_name, disease_details))
-        
-        # Construct the prompt
-        prompt = f"Hi, I am {name}, Age {age} and I am a {gender}."
-        
-        if extracted_data:
-            first_disease = True
-            for ds_name, symptoms_descriptions in extracted_data:
-                if first_disease:
-                    prompt += f"\nI am suffering from {ds_name} "
-                    first_disease = False
-                else:
-                    prompt += f"I also have {ds_name} "
-                prompt += " ".join(symptoms_descriptions) + "."
-            prompt += "\nPlease help me with medication?"
-        else:
-            prompt += "\nNo disease or symptom recorded in the past 15 days."
+
+        # If no data found within the past 15 days
+        if not extracted_data:
+            return (
+                f"Personal Information: Name: {name}, Age: {age}, Gender: {gender}.\n"
+                f"There is no disease or symptom added recently within the past 15 days."
+            )
+
+        # Construct the prompt for available data
+        prompt = f"Personal Information: Name: {name}, Age: {age}, Gender: {gender}.\nMedical History and Symptoms:"
+
+        for idx, (ds_name, details) in enumerate(extracted_data, 1):
+            prompt += f"\n{idx}. {ds_name}, Date of Diagnosis: {details[0]['date']} at {details[0]['time']} with multiple symptom logs."
+            for log in details:
+                log_date = log["date"]
+                log_time = log["time"]
+                symptoms = ", ".join([f"{key}: {value}/10" for key, value in log["symptoms"].items()])
+                prompt += f"\nSymptom Log at {log_date}, {log_time}: {symptoms}."
+
+        # Add common symptoms over time
+        if common_symptoms:
+            prompt += "\n\nCommon Symptoms Logged Over Time:"
+            for title, occurrences in common_symptoms.items():
+                for log_date, log_time, value in occurrences:
+                    prompt += f"\n{log_date}, {log_time}: {title}: {value}/10."
+
+        # Add the request
+        prompt += "\n\nRequest: Provide guidance or recommendations for medication based on the above symptoms and conditions."
 
         return prompt
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
+        
 
 # Function to interact with assistant and get a response for each prompt
 def getAssistantResponse(prompt, assistant_id, vector_store_id, max_retries=10, retry_delay=2):
@@ -111,9 +133,9 @@ def getAssistantResponse(prompt, assistant_id, vector_store_id, max_retries=10, 
         # Create a new thread if no valid one exists
         if not thread_id:
             response = client.beta.threads.create_and_run(
-                instructions="Strictly Give me a response in the following JSON format for each disease:"
+                instructions="In combination of all the disease Strictly Give me a response in the following single JSON format :"
                             "- Summary: future action items on my health condition in 30 words."
-                            "- Suggested medications: (strictly top 3 for each disease)."
+                            "- Suggested medications: (combination of strictly top 3 only 3)."
                             "- Risk Profile: High Risk, Medium Risk, or Low Risk."
                             "- Immediate consultation needed: Yes or No.",
                 assistant_id=assistant_id,
@@ -153,30 +175,31 @@ def getAssistantResponse(prompt, assistant_id, vector_store_id, max_retries=10, 
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Function to generate prompts for each disease
-def generatePrompts(extracted_data , demographicData):
-    try:
-        prompts = []
-        for ds_name, symptoms in extracted_data.items():
-            if not ds_name or not symptoms:
-                continue
+# Update the model to directly reflect the JSON structure
+class DiseaseRecord(BaseModel):
+    recordName: str
+    _id: str
+    updatedAt: str
+    symptoms: list[Dict[str, Any]]
+    status: str
 
-            symptoms_text = ', '.join(symptoms[:-1]) + f" and {symptoms[-1]}" if len(symptoms) > 1 else symptoms[0]
-            
-            # Generate the prompt
-            prompt = (
-                f'''I am suffering from {ds_name} disease with these symptoms: {symptoms_text}. Scored on a scale of 0 (lowest) to 10 (highest).Please provide me with the proper medication and advice on this condition.'''
-            )
-            
-            prompts.append(prompt)
-        for prompt in prompts:
-            print(prompt)
-        return prompts
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+class Disease(BaseModel):
+    disease_id: str
+    ds_name: str
+    updatedAt: str
+    records: list[DiseaseRecord]
+    highValueSymptoms: list[Any]
+
+class Resident(BaseModel):
+    name: str
+    gender: str
+    age: int
 
 class RequestPayload(BaseModel):
-    jsonResponse: Dict[str, Any]
+    message: str
+    resident: Resident
+    diseases: list[Disease]
+
 
 
 class AIPayload(BaseModel):
@@ -185,7 +208,7 @@ class AIPayload(BaseModel):
     AssistantID: str
 
 class ConvertJson(BaseModel):
-    AIinsights : str
+    ai_insights : str
 
 
 @app.post("/getAIinsights/")
@@ -200,7 +223,7 @@ async def fetch_and_respond(payload: AIPayload):
         
         print("Assistant:", AI_insights)
 
-        return  {"AI Insights":AI_insights}
+        return  {"ai_insights":AI_insights}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -208,157 +231,75 @@ async def fetch_and_respond(payload: AIPayload):
 @app.post("/convertToJson/")
 async def convert_to_json(payload: ConvertJson):
     try:
-        # Extract the assistant's response
-        assistant_response = payload.AIinsights
-
+        # Check if the response is empty
+        assistant_response = payload.ai_insights
         if not assistant_response.strip():
+            print("Error: assistant_response is empty.")
             return {"error": "Empty response"}
-
-        # Helper function to clean up text
+        # Initialize an empty dictionary to hold the parsed data
+        response_json = {
+            "summary": None,
+            "medications": [],
+            "risk profile": None,
+            "consultation_needed": None
+        }
         def clean_text(text):
-            return re.sub(r'[^A-Za-z0-9\s:,\(\)\-\.\%]', '', text).strip()
-
-        # Regex pattern to find disease blocks
-        disease_blocks = re.split(r"###", assistant_response)
-
-        if len(disease_blocks) <= 1:
-            return {"error": "No valid disease data found"}
-
-        # Initialize the result list
-        diseases_data = []
-
-        # Iterate through each block to extract details
-        for block in disease_blocks:
-            block = block.strip()
-            if not block:
-                continue
-
-            # Extract disease name (first line before a colon)
-            disease_match = re.match(r"([A-Za-z\s]+):", block)
-            disease_name = clean_text(disease_match.group(1)) if disease_match else "Unknown Disease"
-
-            # Extract summary
-            summary_match = re.search(r"(?i)summary[:\-\s\*#]*([^\n]+)", block)
-            summary = clean_text(summary_match.group(1)) if summary_match else "No summary available"
-
-            # Extract medications
-            medications_match = re.search(r"(?i)suggested\s+medications[:\-\s\*#]*([\s\S]*?)(?=\n- \*\*|$)", block)
-            medications_text = medications_match.group(1).strip() if medications_match else ""
-            medications = re.findall(r"\d+\.\s*([^\n]+)", medications_text)
-            top_3_medications = [clean_text(med) for med in medications[:3]]
-
-            # Extract risk profile
-            risk_match = re.search(r"(?i)risk\s+profile[:\-\s\*#]*([^\n]+)", block)
-            risk_profile = clean_text(risk_match.group(1)).capitalize() if risk_match else "Unknown"
-
-            # Extract consultation status
-            consultation_match = re.search(r"(?i)immediate\s+consultation\s+needed[:\-\s\*#]*([^\n]+)", block)
-            consultation_needed = (
-                "Yes" if consultation_match and "yes" in consultation_match.group(1).lower() else "No"
-            )
-
-            # Append the processed data for this disease
-            diseases_data.append({
-                "disease": disease_name,
-                "summary": summary,
-                "medications": top_3_medications,
-                "risk_profile": risk_profile,
-                "consultation_needed": consultation_needed
-            })
-
-        return diseases_data
-
+            return re.sub(r'[^A-Za-z0-9\s]', '', text).strip()
+        # Define regex patterns to match each part of the response
+        summary_pattern = r"(?i)summary[:\-\s\*#]*([^\*\#]*?)(?=\n|$)"
+        medications_pattern = r"(?i)suggested\s+medications[:\-\s\*#]*([\s\S]*?)(?=###|risk|immediate|$)"
+        risk_pattern = r"(?i)(risk\s+profile|risk)[:\-\s\*#]*([^\*\#]*?)(?=\n|$)"
+        consultation_pattern = r"(?i)immediate\s+consultation\s+needed[:\-\s\*#]*([^\*\#]*?)(?=\n|$)"
+        # Extract summary
+        summary_match = re.search(summary_pattern, assistant_response, re.DOTALL)
+        if summary_match:
+            response_json["summary"] = clean_text(summary_match.group(1).strip())
+        # Extract medications as list items, handling bullet points
+        medications_match = re.search(medications_pattern, assistant_response, re.DOTALL)
+        if medications_match:
+            medications_text = medications_match.group(1).strip()
+            medications = re.split(r'\s*\d+\.\s*|\n|,\s*', medications_text)
+            response_json["medications"] = [clean_text(med) for med in medications if clean_text(med)]
+        # Extract and validate risk profile
+        risk_match = re.search(risk_pattern, assistant_response, re.DOTALL)
+        if risk_match:
+            risk_value = clean_text(risk_match.group(2)).lower()
+            if "low" in risk_value:
+                response_json["risk profile"] = "Low Risk"
+            elif "moderate" in risk_value:
+                response_json["risk profile"] = "Moderate Risk"
+            elif "high" in risk_value:
+                response_json["risk profile"] = "High Risk"
+            elif "medium" in risk_value:
+                response_json["risk profile"] = "Medium Risk"
+            else:
+                response_json["risk profile"] = "None"
+                
+        # Extract and validate consultation needed (Yes/No only)
+        consultation_match = re.search(consultation_pattern, assistant_response, re.DOTALL)
+        if consultation_match:
+            consultation_value = clean_text(consultation_match.group(1)).lower()
+            if "yes" in consultation_value:
+                response_json["consultation_needed"] = "Yes"
+            elif "no" in consultation_value:
+                response_json["consultation_needed"] = "No"
+        return response_json 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# @app.post("/convertToJson/")
-# async def convert_to_json(payload :ConvertJson):
-
-#     try:
-#         # Check if the response is empty
-#         assistant_response = payload.AIinsights
-
-#         if not assistant_response.strip():
-#             print("Error: assistant_response is empty.")
-#             return {"error": "Empty response"}
-
-#         # Initialize an empty dictionary to hold the parsed data
-#         response_json = {
-#             "summary": None,
-#             "medications": [],
-#             "risk profile": None,
-#             "consultation_needed": None
-#         }
-
-#         def clean_text(text):
-#             return re.sub(r'[^A-Za-z0-9\s]', '', text).strip()
-
-#         # Define regex patterns to match each part of the response
-#         summary_pattern = r"(?i)summary[:\-\s\*#]*([^\*\#]*?)(?=\n|$)"
-#         medications_pattern = r"(?i)suggested\s+medications[:\-\s\*#]*([\s\S]*?)(?=###|risk|immediate|$)"
-#         risk_pattern = r"(?i)(risk\s+profile|risk)[:\-\s\*#]*([^\*\#]*?)(?=\n|$)"
-#         consultation_pattern = r"(?i)immediate\s+consultation\s+needed[:\-\s\*#]*([^\*\#]*?)(?=\n|$)"
-
-
-#         # Extract summary
-#         summary_match = re.search(summary_pattern, assistant_response, re.DOTALL)
-#         if summary_match:
-#             response_json["summary"] = clean_text(summary_match.group(1).strip())
-
-        
-
-#         # # Extract medications as list items, handling bullet points
-#         medications_match = re.search(medications_pattern, assistant_response, re.DOTALL)
-#         if medications_match:
-#             medications_text = medications_match.group(1).strip()
-#             medications = re.split(r'\s*\d+\.\s*|\n|,\s*', medications_text)
-#             response_json["medications"] = [clean_text(med) for med in medications if clean_text(med)]
-
-#         # Extract and validate risk profile
-#         risk_match = re.search(risk_pattern, assistant_response, re.DOTALL)
-#         if risk_match:
-#             risk_value = clean_text(risk_match.group(2)).lower()
-#             if "low" in risk_value:
-#                 response_json["risk profile"] = "Low Risk"
-#             elif "moderate" in risk_value:
-#                 response_json["risk profile"] = "Moderate Risk"
-#             elif "high" in risk_value:
-#                 response_json["risk profile"] = "High Risk"
-#             elif "medium" in risk_value:
-#                 response_json["risk profile"] = "Medium Risk"
-#             else:
-#                 response_json["risk profile"] = "None"
-                
-
-#         # Extract and validate consultation needed (Yes/No only)
-#         consultation_match = re.search(consultation_pattern, assistant_response, re.DOTALL)
-#         if consultation_match:
-#             consultation_value = clean_text(consultation_match.group(1)).lower()
-#             if "yes" in consultation_value:
-#                 response_json["consultation_needed"] = "Yes"
-#             elif "no" in consultation_value:
-#                 response_json["consultation_needed"] = "No"
-
-#         return response_json 
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/getPrompts/")
 async def getPromptsdata(payload: RequestPayload):
     try:
 
-        jsonResponse = payload.jsonResponse
-        prompts = extractData(jsonResponse)
+        prompts = extractData(payload.dict())
 
         if not prompts:
             return {"error": "No data extracted from jsonResponse"}
 
-        # prompts = generatePrompts(data , demographicData)
-
         print("Prompt",prompts) 
-        return {"Prompts": prompts}
+        return {"prompt": prompts}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
