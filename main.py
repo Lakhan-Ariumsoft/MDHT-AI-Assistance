@@ -12,11 +12,10 @@ from typing import Dict, Any
 from datetime import datetime
 from typing import Optional
 
+
 load_dotenv()
 client = OpenAI()
 app = FastAPI()
-
-
 thread_cache = {}
 client.api_key = os.getenv("OPENAI_API_KEY")
 
